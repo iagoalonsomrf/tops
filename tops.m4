@@ -52,7 +52,7 @@ LIBVIRT_BUILD_ARG=""
 if [ -n "$LIBVIRT_GID_BUILD" ]; then LIBVIRT_BUILD_ARG="--build-arg LIBVIRT_GID=${LIBVIRT_GID_BUILD}"; fi
 
 { docker buildx build --platform=linux/amd64 -t tops --build-arg USER_ID=${USER_ID} ${LIBVIRT_BUILD_ARG} -f - . <<-\EOF
-  FROM amd64/ubuntu:22.04 AS builder
+  FROM amd64/ubuntu:24.04 AS builder
   ARG LASTPASS_VERSION=1.6.1
   RUN apt-get update && \
       apt-get -y install \
@@ -74,15 +74,16 @@ if [ -n "$LIBVIRT_GID_BUILD" ]; then LIBVIRT_BUILD_ARG="--build-arg LIBVIRT_GID=
       tar -zx -C /tmp/lastpass-cli --strip-components=1
   RUN cd /tmp/lastpass-cli && export CFLAGS="-fcommon" && make
 
-  FROM amd64/ubuntu:22.04
+  FROM amd64/ubuntu:24.04
 
-  ARG ANSIBLE_VERSION=9.8.0
-  ARG ANSIBLE_COMMUNITY_GENERAL_COLLECTION_VERSION=11.2.0
+  ARG ANSIBLE_CORE_VERSION=2.18.6
+  ARG ANSIBLE_POSIX_VERSION=1.6.2
+  ARG ANSIBLE_UTILS_VERSION=5.1.2
   ARG CALICOCTL_VERSION=v3.29.5
   ARG CMCTL_VERSION=v2.5.0
   ARG DELTA_VERSION=0.18.1
   ARG DRIFTCTL_VERSION=0.40.0
-  ARG GOLANG_VERSION=1.18
+  ARG GOLANG_VERSION=1.22
   ARG HELM_VERSION=3.10.1
   ARG ISTIO_VERSION=1.27.1
   ARG KUBECTL_VERSION=1.32.8
@@ -97,14 +98,15 @@ if [ -n "$LIBVIRT_GID_BUILD" ]; then LIBVIRT_BUILD_ARG="--build-arg LIBVIRT_GID=
   ARG TERRAFORM_PROVIDER_SOPS_VERSION=1.2.1
   ARG TERRAFORM_VERSION=1.13.3
   ARG TERRAGRUNT_VERSION=1.1.0
-  ARG GCLOUD_VERSION=473.0.0-0
+  ARG GCLOUD_VERSION=582.0.0-0
   ARG VIRTUALBOX_VERSION=7.0
   ARG INFINISPAN_QUARKUS_VERSION=16.0.13
   ARG LIBVIRT_GID=""
   ARG NODE_VERSION=22
   ARG USER_ID
 
-  RUN useradd -u ${USER_ID} -s /bin/bash -d /home/tops -m tops && \
+  RUN if getent passwd ${USER_ID} > /dev/null; then userdel -r "$(getent passwd ${USER_ID} | cut -d: -f1)"; fi && \
+      useradd -u ${USER_ID} -s /bin/bash -d /home/tops -m tops && \
       if [ -n "${LIBVIRT_GID}" ]; then groupadd -g ${LIBVIRT_GID} libvirt 2>/dev/null || true; usermod -aG libvirt tops; fi
 
   RUN apt-get update && \
@@ -212,10 +214,10 @@ if [ -n "$LIBVIRT_GID_BUILD" ]; then LIBVIRT_BUILD_ARG="--build-arg LIBVIRT_GID=
   RUN curl -Ls https://github.com/derailed/k9s/releases/download/v${K9S_VERSION}/k9s_Linux_amd64.tar.gz  | tar -zx k9s && \
       mv k9s /usr/local/bin/
 
-  RUN pip3 install \
+  RUN pip3 install --break-system-packages \
               "molecule[lint]" \
               ansible-lint \
-              ansible==${ANSIBLE_VERSION} \
+              ansible-core==${ANSIBLE_CORE_VERSION} \
               distlib \
               boto3 \
               kubernetes==${KUBERNETES_PYTHON_VERSION} \
@@ -249,8 +251,6 @@ if [ -n "$LIBVIRT_GID_BUILD" ]; then LIBVIRT_BUILD_ARG="--build-arg LIBVIRT_GID=
   RUN mkdir -p /home/tops/.ssh && \
       echo 'PubkeyAcceptedKeyTypes +ssh-dss-cert-v01@openssh.com' >> /home/tops/.ssh/config && \
       ssh-keyscan -t ecdsa-sha2-nistp256 github.com >> /home/tops/.ssh/known_hosts
-
-  RUN rm -rf /usr/local/lib/python3.10/dist-packages/ansible_collections/community/general
 
   RUN curl -Ls "https://github.com/Shopify/kubeaudit/releases/download/v0.22.1/kubeaudit_0.22.1_linux_amd64.tar.gz" -o /tmp/kubeaudit_0.22.1_linux_amd64.tar.gz && \
       cd /tmp && \
@@ -334,9 +334,13 @@ if [ -n "$LIBVIRT_GID_BUILD" ]; then LIBVIRT_BUILD_ARG="--build-arg LIBVIRT_GID=
         kubectl krew install rook-ceph && \
         kubectl krew install slice
 
-  RUN ansible-galaxy collection install community.general:==${ANSIBLE_COMMUNITY_GENERAL_COLLECTION_VERSION}
-
   RUN mkdir -p ~/.aws/cli
+
+  RUN mkdir -p ~/.ansible
+
+  RUN ansible-galaxy collection install \
+        ansible.posix:==${ANSIBLE_POSIX_VERSION} \
+        ansible.utils:==${ANSIBLE_UTILS_VERSION}
 
   RUN steampipe plugin install steampipe && \
       steampipe plugin install aws
